@@ -8,18 +8,14 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HealthMonitor {
     private static final int WINDOW_SIZE = 1000;
     private static final long STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
-    private final ConcurrentHashMap<String, Deque<Long>> latency;
-    private final ConcurrentHashMap<String, Deque<String>> statuses;
+    private final ConcurrentHashMap<String, Deque<Long>> serviceLatency;
+    private final ConcurrentHashMap<String, Deque<String>> serviceStatuses;
     private final ConcurrentHashMap<String, Long> lastHeartbeat;
 
     public HealthMonitor(){
-        this.latency = new ConcurrentHashMap<>();
-        this.statuses = new ConcurrentHashMap<>();
+        this.serviceLatency = new ConcurrentHashMap<>();
+        this.serviceStatuses = new ConcurrentHashMap<>();
         this.lastHeartbeat = new ConcurrentHashMap<>();
-    }
-
-    private String edgeKey(String from, String to){
-        return from + "->" + to;
     }
 
     public void recordHeartbeat(Event event){
@@ -37,32 +33,31 @@ public class HealthMonitor {
     }
 
     public void addEvent(Event event){
-        String key = edgeKey(event.getFromService(), event.getToService());
+        String service = event.getToService();
 
-        // record latency
-        latency.computeIfAbsent(key, k -> new LinkedList<>());
-        Deque<Long> latencyDeque = latency.get(key);
-        synchronized(latencyDeque){
-            if(latencyDeque.size() >= WINDOW_SIZE){
-                latencyDeque.pollFirst();
+        // record per-service latency (keyed by toService)
+        serviceLatency.computeIfAbsent(service, k -> new LinkedList<>());
+        Deque<Long> svcLatDeque = serviceLatency.get(service);
+        synchronized(svcLatDeque){
+            if(svcLatDeque.size() >= WINDOW_SIZE){
+                svcLatDeque.pollFirst();
             }
-            latencyDeque.addLast((long) event.getLatency());
+            svcLatDeque.addLast((long) event.getLatency());
         }
 
-        // record status
-        statuses.computeIfAbsent(key, k -> new LinkedList<>());
-        Deque<String> statusDeque = statuses.get(key);
-        synchronized(statusDeque){
-            if(statusDeque.size() >= WINDOW_SIZE){
-                statusDeque.pollFirst();
+        // record per-service status (keyed by toService)
+        serviceStatuses.computeIfAbsent(service, k -> new LinkedList<>());
+        Deque<String> svcStatusDeque = serviceStatuses.get(service);
+        synchronized(svcStatusDeque){
+            if(svcStatusDeque.size() >= WINDOW_SIZE){
+                svcStatusDeque.pollFirst();
             }
-            statusDeque.addLast(event.getStatus());
+            svcStatusDeque.addLast(event.getStatus());
         }
     }
 
-    public double getRollingAverageLatency(String from, String to){
-        String key = edgeKey(from, to);
-        Deque<Long> deque = latency.get(key);
+    public double getRollingAverageLatency(String service){
+        Deque<Long> deque = serviceLatency.get(service);
         if(deque == null || deque.isEmpty()) return Double.MAX_VALUE;
         synchronized(deque){
             long sum = 0;
@@ -73,9 +68,8 @@ public class HealthMonitor {
         }
     }
 
-    public double calculateP95Latency(String from, String to){
-        String key = edgeKey(from, to);
-        Deque<Long> deque = latency.get(key);
+    public double calculateServiceP95Latency(String service){
+        Deque<Long> deque = serviceLatency.get(service);
         if(deque == null || deque.isEmpty()) return 0.0;
         synchronized(deque){
             List<Long> sorted = new ArrayList<>(deque);
@@ -85,9 +79,8 @@ public class HealthMonitor {
         }
     }
 
-    public double calculateErrorRate(String from, String to){
-        String key = edgeKey(from, to);
-        Deque<String> deque = statuses.get(key);
+    public double calculateServiceErrorRate(String service){
+        Deque<String> deque = serviceStatuses.get(service);
         if(deque == null || deque.isEmpty()) return 0.0;
         synchronized(deque){
             long errors = 0;
@@ -103,22 +96,11 @@ public class HealthMonitor {
     public Map<String, Object> getServiceHealth(String service){
         Map<String, Object> health = new HashMap<>();
         health.put("service", service);
+        health.put("p95_latency", calculateServiceP95Latency(service));
+        health.put("error_rate", calculateServiceErrorRate(service));
         health.put("stale", isStale(service));
         health.put("last_heartbeat", getLastHeartbeat(service));
         return health;
     }
 
-    public Map<String, Object> getServiceHealth(String from, String to){
-        Map<String, Object> health = new HashMap<>();
-        health.put("from", from);
-        health.put("to", to);
-        health.put("rolling_avg_latency", getRollingAverageLatency(from, to));
-        health.put("p95_latency", calculateP95Latency(from, to));
-        health.put("error_rate", calculateErrorRate(from, to));
-        health.put("from_stale", isStale(from));
-        health.put("to_stale", isStale(to));
-        health.put("from_last_heartbeat", getLastHeartbeat(from));
-        health.put("to_last_heartbeat", getLastHeartbeat(to));
-        return health;
-    }
 }

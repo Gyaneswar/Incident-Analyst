@@ -38,6 +38,10 @@ public class DatasetGenerator {
                 if (args.length < 3) { printUsage(); return; }
                 testEndpoints(Integer.parseInt(args[1]), Integer.parseInt(args[2]));
                 break;
+            case "ping":
+                if (args.length < 3) { printUsage(); return; }
+                ping(args[1], Integer.parseInt(args[2]));
+                break;
             default:
                 printUsage();
         }
@@ -48,6 +52,9 @@ public class DatasetGenerator {
         System.out.println("  generate <numServices> <numEvents>                - Generate events.csv");
         System.out.println("  produce  <numServices> <numEvents> <numProducers> - POST events to running server");
         System.out.println("  test     <numServices> <numEvents>                - Benchmark all API endpoints");
+        System.out.println("  ping     <endpoint|random> <numServices>           - Continuously ping endpoint(s)");
+        System.out.println("           endpoint examples: /reachable, /dependents, /shortest_path, /cycles, /critical_services, /health");
+        System.out.println("           use 'random' to randomly rotate through all endpoints");
     }
 
     private static void generate(int numServices, int numEvents) throws IOException {
@@ -198,6 +205,52 @@ public class DatasetGenerator {
                 totalMs += (System.nanoTime() - start) / 1_000_000.0;
             }
             System.out.printf("  %-50s avg: %.2fms%n", endpoint, totalMs / runs);
+        }
+    }
+
+    private static void ping(String target, int numServices) throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        Random random = new Random();
+
+        String[] allEndpoints = {"/reachable", "/dependents", "/shortest_path", "/cycles", "/critical_services", "/health"};
+        boolean isRandom = target.equalsIgnoreCase("random");
+        long requestCount = 0;
+
+        System.out.println("Pinging " + (isRandom ? "random endpoints" : target) + " continuously (Ctrl+C to stop)\n");
+
+        while (true) {
+            String svc1 = "service-" + random.nextInt(numServices);
+            String svc2 = "service-" + random.nextInt(numServices);
+            while (svc2.equals(svc1)) svc2 = "service-" + random.nextInt(numServices);
+
+            String endpoint;
+            if (isRandom) {
+                endpoint = allEndpoints[random.nextInt(allEndpoints.length)];
+            } else {
+                endpoint = target.startsWith("/") ? target : "/" + target;
+            }
+
+            String url = switch (endpoint) {
+                case "/reachable" -> endpoint + "?service=" + svc1;
+                case "/dependents" -> endpoint + "?service=" + svc1;
+                case "/shortest_path" -> endpoint + "?from=" + svc1 + "&to=" + svc2;
+                case "/health" -> endpoint + "?from=" + svc1 + "&to=" + svc2;
+                default -> endpoint;
+            };
+
+            try {
+                long start = System.nanoTime();
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(BASE_URL + url))
+                        .GET().build();
+                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+                double ms = (System.nanoTime() - start) / 1_000_000.0;
+                requestCount++;
+
+                System.out.printf("[#%d] [%d] %-50s %.2fms%n", requestCount, resp.statusCode(), url, ms);
+            } catch (Exception e) {
+                System.err.printf("[#%d] ERROR %-50s %s%n", requestCount, url, e.getMessage());
+            }
         }
     }
 

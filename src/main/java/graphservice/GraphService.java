@@ -43,11 +43,10 @@ public class GraphService{
         }
     }
 
-    public void removeNode(String serviceName){
+    public void removeEdge(String from, String to){
         lock.writeLock().lock();
         try {
-            //System.out.println("Removing service: " + serviceName);
-            graph.remove(serviceName);
+            graph.removeEdge(from, to);
         } finally {
             lock.writeLock().unlock();
         }

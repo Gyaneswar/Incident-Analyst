@@ -59,7 +59,7 @@ public class Graph{
             HashSet<Node> set = nodes.get(fromServiceName);
             for(Node node : set){
                 if(node.nodeName.equals(toServiceName)){
-                    node.latency = (int) healthMonitor.getRollingAverageLatency(fromServiceName, toServiceName);
+                    node.latency = (int) healthMonitor.getRollingAverageLatency(toServiceName);
                     return;
                 }
             }
@@ -88,16 +88,16 @@ public class Graph{
     }
 
 
-    void remove(String serviceName){
-        for(String key : new ArrayList<>(nodes.keySet())){
-            nodes.get(key).removeIf(node -> node.nodeName.equals(serviceName));
+    void removeEdge(String from, String to){
+        HashSet<Node> forward = nodes.get(from);
+        if(forward != null){
+            forward.removeIf(node -> node.nodeName.equals(to));
         }
-        nodes.remove(serviceName);
 
-        for(String key : new ArrayList<>(reverseNodes.keySet())){
-            reverseNodes.get(key).removeIf(node -> node.nodeName.equals(serviceName));
+        HashSet<Node> reverse = reverseNodes.get(to);
+        if(reverse != null){
+            reverse.removeIf(node -> node.nodeName.equals(from));
         }
-        reverseNodes.remove(serviceName);
     }
 
     @Override

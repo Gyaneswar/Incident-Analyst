@@ -16,7 +16,7 @@ public class App {
         GraphService graphService = new GraphService(healthMonitor);
         queue eventQueue = new queue();
         EventToFile eventToFile = new EventToFile();
-        orchestrator orch = new orchestrator(eventQueue, graphService, eventToFile, 20, healthMonitor);
+        orchestrator orch = new orchestrator(eventQueue, graphService, eventToFile, 500, healthMonitor);
         orch.start();
 
         Javalin app = Javalin.create()
@@ -91,12 +91,11 @@ public class App {
             ctx.json(Map.of("k", k, "samples", samples, "critical_services", result));
         });
 
-        // GET /health?from=A&to=B
+        // GET /health?service=A
         app.get("/health", ctx -> {
-            String from = ctx.queryParam("from");
-            String to = ctx.queryParam("to");
-            if(from == null || to == null){ ctx.status(400).json(Map.of("error", "missing 'from' or 'to' param")); return; }
-            ctx.json(orch.getHealth(from, to));
+            String service = ctx.queryParam("service");
+            if(service == null){ ctx.status(400).json(Map.of("error", "missing 'service' param")); return; }
+            ctx.json(orch.getHealth(service));
         });
 
         // POST /event — publish an event to the queue
@@ -105,5 +104,13 @@ public class App {
             orch.publishEvent(event);
             ctx.json(Map.of("status", "queued", "eventId", event.getEventId()));
         });
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("Shutting down gracefully...");
+            app.stop();
+            orch.shutdown();
+            eventToFile.shutdown();
+            System.out.println("Shutdown complete.");
+        }));
     }
 }

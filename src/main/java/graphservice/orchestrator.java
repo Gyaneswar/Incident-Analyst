@@ -59,7 +59,7 @@ public class orchestrator {
                 graphService.addEvent(from, to);
                 break;
             case DEPENDENCY_REMOVED:
-                graphService.removeNode(event.getFromService());
+                graphService.removeEdge(event.getFromService(), event.getToService());
                 break;
             case HEARTBEAT:
                 healthMonitor.recordHeartbeat(event);
@@ -101,8 +101,8 @@ public class orchestrator {
         return graphService.criticalNodesFast(k, sampleSize);
     }
 
-    public Map<String, Object> getHealth(String from, String to){
-        return healthMonitor.getServiceHealth(from, to);
+    public Map<String, Object> getHealth(String service){
+        return healthMonitor.getServiceHealth(service);
     }
 
     public void shutdown(){

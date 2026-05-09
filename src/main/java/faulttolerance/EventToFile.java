@@ -4,14 +4,18 @@ import common.Event;
 import common.EventType;
 
 import java.io.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 //This class will write/read events to/from a CSV file
 public class EventToFile {
     private static final String FILE_PATH = "events.csv";
+    private final ExecutorService writeExecutor = Executors.newSingleThreadExecutor();
     private BufferedReader reader;
 
     public void writeEvents(Event event){
-        new Thread(() -> {
+        writeExecutor.submit(() -> {
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(FILE_PATH, true))){
                 writer.write(String.join(",",
                         event.getEventId(),
@@ -25,7 +29,19 @@ public class EventToFile {
             } catch (IOException e) {
                 System.err.println("Failed to write event: " + e.getMessage());
             }
-        }).start();
+        });
+    }
+
+    public void shutdown(){
+        writeExecutor.shutdown();
+        try {
+            if(!writeExecutor.awaitTermination(5, TimeUnit.SECONDS)){
+                writeExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            writeExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     public Event readEvents(){

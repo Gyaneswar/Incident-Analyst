@@ -14,8 +14,8 @@ A real-time service dependency graph analyzer built in Java. It ingests dependen
 - **orchestrator** — Bridges the queue, graph, health monitor, and file backup. Polls the queue every 50ms and dispatches events to a thread pool of 4 workers.
 - **GraphService** — Maintains the dependency graph with a `ReentrantReadWriteLock`. Read queries hold the read lock and operate directly on the live graph (no snapshot/copy).
 - **Graph** — Directed graph stored as two adjacency maps (`nodes` for forward edges, `reverseNodes` for reverse edges).
-- **HealthMonitor** — Tracks rolling average latency, P95 latency, error rates, and heartbeat staleness per service edge. Uses `ConcurrentHashMap` with per-deque synchronized blocks.
-- **EventToFile** — Appends every processed event to `events.csv` for durability/replay.
+- **HealthMonitor** — Tracks per-service P95 latency, error rate, rolling average latency, and heartbeat staleness. Metrics are keyed by the destination service (`toService`). Uses `ConcurrentHashMap` with per-deque synchronized blocks.
+- **EventToFile** — Appends every processed event to `events.csv` for durability/replay. Writes are serialized through a single-thread `ExecutorService` to prevent corruption and support graceful shutdown.
 - **queue** — A `LinkedBlockingQueue` (capacity 10,000) for decoupling event ingestion from processing.
 
 ### Event Types
@@ -23,7 +23,7 @@ A real-time service dependency graph analyzer built in Java. It ingests dependen
 | Type | Description |
 |---|---|
 | `DEPENDENCY_OBSERVED` | Records a latency observation between two services. Updates the graph edge and health metrics. |
-| `DEPENDENCY_REMOVED` | Removes a service and all its edges from the graph. |
+| `DEPENDENCY_REMOVED` | Removes the edge between `fromService` and `toService` from the graph. Both nodes remain with their other edges intact. |
 | `HEARTBEAT` | Records a heartbeat timestamp for a service (used for staleness detection). |
 
 ---
@@ -57,7 +57,7 @@ A real-time service dependency graph analyzer built in Java. It ingests dependen
 
 Every processed event is appended to `events.csv` via `EventToFile`. On startup, the graph is rebuilt by replaying this file.
 
-**Why:** Simple crash recovery. If the process restarts, it replays all events and reconstructs the graph to its last known state. File writes happen in a separate thread so the caller (worker pool) is not blocked by disk I/O.
+**Why:** Simple crash recovery. If the process restarts, it replays all events and reconstructs the graph to its last known state. File writes are submitted to a single-thread executor so the caller (worker pool) is not blocked by disk I/O, and writes are serialized to prevent file corruption.
 
 **Tradeoff / future scaling:**
 - Currently everything goes to a single file. Under high throughput this becomes a bottleneck (single writer, unbounded file growth).
@@ -221,26 +221,34 @@ curl "http://localhost:7070/critical_services?k=5&samples=200"
 {"k": 5, "samples": 200, "critical_services": ["user-service", "api-gateway", "auth-service", "db-service", "cache"]}
 ```
 
-### GET /health — Health metrics for an edge between two services
+### GET /health — Per-service health metrics (P95 latency, error rate)
+
+Returns P95 latency and error rate for a specific service. Metrics are aggregated from all incoming edges (any `fromService -> service` event records latency/status under the destination service).
 
 ```bash
-curl "http://localhost:7070/health?from=api-gateway&to=user-service"
+curl "http://localhost:7070/health?service=user-service"
 ```
 
 **Response:**
 ```json
 {
-  "from": "api-gateway",
-  "to": "user-service",
-  "rolling_avg_latency": 42.5,
+  "service": "user-service",
   "p95_latency": 120.0,
   "error_rate": 0.05,
-  "from_stale": false,
-  "to_stale": false,
-  "from_last_heartbeat": 1715250000000,
-  "to_last_heartbeat": 1715250000000
+  "stale": false,
+  "last_heartbeat": 1715250000000
 }
 ```
+
+---
+
+## Graceful Shutdown
+
+On `SIGTERM` (or normal JVM termination), a shutdown hook runs in order:
+
+1. **Javalin** stops — finishes in-flight HTTP requests, stops accepting new ones.
+2. **Orchestrator** shuts down — stops the poller, drains the worker pool (5s timeout).
+3. **EventToFile** shuts down — flushes pending file writes (5s timeout).
 
 ---
 
@@ -253,6 +261,7 @@ curl "http://localhost:7070/health?from=api-gateway&to=user-service"
 | Graph writes (`addEvent`, `removeNode`) | Write lock                                     | yes, requests go to the queue   |
 | Graph reads (all queries) | Read lock on live graph                        | Yes, concurrent with each other |
 | HealthMonitor | `ConcurrentHashMap` + per-deque `synchronized` | Yes                             |
+| EventToFile writes | Single-thread `ExecutorService`                | Serialized (no corruption)      |
 
 ---
 
