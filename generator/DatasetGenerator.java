@@ -148,16 +148,16 @@ public class DatasetGenerator {
     }
 
     private static void testEndpoints(int numServices, int numEvents) throws Exception {
-        // delete old events file before starting
-        File eventsFile = new File(OUTPUT_FILE);
-        if(eventsFile.exists() && eventsFile.delete()){
-            System.out.println("Deleted " + OUTPUT_FILE);
-        }
 
         // produce events to the running server first
         System.out.println("=== Producing %d events for %d services ===\n".formatted(numEvents, numServices));
         produce(numServices, numEvents, 4);
         System.out.println();
+
+        // wait for the server to finish processing queued events
+        System.out.println("Waiting for queue to drain...");
+        Thread.sleep(50000);
+        System.out.println("Starting benchmark\n");
 
         HttpClient client = HttpClient.newHttpClient();
         Random random = new Random();

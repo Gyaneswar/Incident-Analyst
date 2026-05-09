@@ -53,42 +53,36 @@ public class GraphService{
         }
     }
 
-    private Graph snapshot(){
+    //use BFS to find all the reachable nodes
+    public List<String> getReachable(String serviceName){
         lock.readLock().lock();
         try {
-            Graph snap = graph.snapshot();
-            //System.out.println("Snapshot: " + snap);
-            return snap;
+        Queue<String> queue = new LinkedList<>();
+        queue.add(serviceName);
+        List<String> reachableNodes = new ArrayList<>();
+        HashSet<String> visited = new HashSet<>();
+
+        while(!queue.isEmpty()){
+            String node = queue.poll();
+            if(visited.contains(node)) continue;
+            visited.add(node);
+            reachableNodes.add(node);
+
+            for(Node neighbor : graph.getDependents(node)){
+                if(visited.contains(neighbor.nodeName)) continue;
+                queue.add(neighbor.nodeName);
+            }
+        }
+        return reachableNodes;
         } finally {
             lock.readLock().unlock();
         }
     }
 
-    //use BFS to find all the reachable nodes
-    public List<String> getReachable(String serviceName){
-        Graph snap = snapshot();
-        Queue<String> queue = new LinkedList<>();
-        queue.add(serviceName);
-        List<String> reachableNodes = new ArrayList<>();
-        HashSet<String> visited = new HashSet<>();
-
-        while(!queue.isEmpty()){
-            String node = queue.poll();
-            if(visited.contains(node)) continue;
-            visited.add(node);
-            reachableNodes.add(node);
-
-            for(Node neighbor : snap.getDependents(node)){
-                if(visited.contains(neighbor.nodeName)) continue;
-                queue.add(neighbor.nodeName);
-            }
-        }
-        return reachableNodes;
-    }
-
     //find all the incoming edges to the particular service
     public List<String> predecessors(String serviceName){
-        Graph snap = snapshot();
+        lock.readLock().lock();
+        try {
         Queue<String> queue = new LinkedList<>();
         queue.add(serviceName);
         List<String> reachableNodes = new ArrayList<>();
@@ -100,12 +94,15 @@ public class GraphService{
             visited.add(node);
             reachableNodes.add(node);
 
-            for(Node neighbor : snap.getPredecessors(node)){
+            for(Node neighbor : graph.getPredecessors(node)){
                 if(visited.contains(neighbor.nodeName)) continue;
                 queue.add(neighbor.nodeName);
             }
         }
         return reachableNodes;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     //find all cycles in the graph using kosaraju's algorithm
@@ -113,14 +110,15 @@ public class GraphService{
     //pass 2: DFS on reversed graph in reverse finish order, each tree is an SCC
     // This is will result in scc, but in a directed graph, the cycles are present within scc
     public List<List<String>> cycles(){
-        Graph snap = snapshot();
+        lock.readLock().lock();
+        try {
         HashSet<String> visited = new HashSet<>();
         Stack<String> finishStack = new Stack<>();
 
         // Pass 1: DFS on original graph, record finish order
-        for(String node : snap.keySet()){
+        for(String node : graph.keySet()){
             if(!visited.contains(node)){
-                dfsForward(snap, node, visited, finishStack);
+                dfsForward(graph, node, visited, finishStack);
             }
         }
 
@@ -131,13 +129,16 @@ public class GraphService{
             String node = finishStack.pop();
             if(!visited.contains(node)){
                 List<String> component = new ArrayList<>();
-                dfsReverse(snap, node, visited, component);
+                dfsReverse(graph, node, visited, component);
                 if(component.size() > 1){
                     sccs.add(component);
                 }
             }
         }
         return sccs;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     private void dfsForward(Graph g, String node, HashSet<String> visited, Stack<String> finishStack){
@@ -164,26 +165,36 @@ public class GraphService{
 
     //use Dijkstra to find the shortest path
     public List<String> shortestPath(String fromService, String toService){
-        Graph snap = snapshot();
+        lock.readLock().lock();
+        try {
         HashMap<String, Double> dist = new HashMap<>();
         HashMap<String, String> previous = new HashMap<>();
         HashSet<String> settled = new HashSet<>();
         dist.put(fromService, 0.0);
-        PriorityQueue<String> pq = new PriorityQueue<>((a, b) -> dist.get(a).compareTo(dist.get(b)));
-        pq.add(fromService);
+        PriorityQueue<double[]> pq = new PriorityQueue<>((a, b) -> Double.compare(a[0], b[0]));
+        HashMap<String, Integer> nameToId = new HashMap<>();
+        ArrayList<String> idToName = new ArrayList<>();
+        nameToId.put(fromService, 0);
+        idToName.add(fromService);
+        pq.add(new double[]{0.0, 0});
         while(!pq.isEmpty()) {
-            String start = pq.poll();
+            double[] top = pq.poll();
+            String start = idToName.get((int) top[1]);
             if(settled.contains(start)) continue;
             settled.add(start);
             if(start.equals(toService)) break;
-            for (Node node : snap.getDependents(start)) {
+            for (Node node : graph.getDependents(start)) {
                 String currentNode = node.nodeName;
                 double currentDist = dist.getOrDefault(currentNode, (double) Integer.MAX_VALUE);
-                double newDist = dist.get(start) + node.latency;
+                double newDist = top[0] + node.latency;
                 if(newDist < currentDist){
                     dist.put(currentNode, newDist);
                     previous.put(currentNode, start);
-                    pq.add(currentNode);
+                    if(!nameToId.containsKey(currentNode)){
+                        nameToId.put(currentNode, idToName.size());
+                        idToName.add(currentNode);
+                    }
+                    pq.add(new double[]{newDist, nameToId.get(currentNode)});
                 }
             }
         }
@@ -199,15 +210,19 @@ public class GraphService{
             current = previous.get(current);
         }
         return path;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     //betweenness centrality using Brandes' algorithm
     //for each source, run Dijkstra and accumulate dependency scores
     //nodes that appear on the most shortest paths are the most critical
     public List<String> criticalNodes(int k){
-        Graph snap = snapshot();
+        lock.readLock().lock();
+        try {
         HashMap<String, Double> centrality = new HashMap<>();
-        Set<String> allNodes = snap.keySet();
+        Set<String> allNodes = graph.keySet();
         for(String node : allNodes){
             centrality.put(node, 0.0);
         }
@@ -238,7 +253,7 @@ public class GraphService{
                 if(dist.get(v) == Integer.MAX_VALUE) break;
                 stack.push(v);
 
-                for(Node neighbor : snap.getDependents(v)){
+                for(Node neighbor : graph.getDependents(v)){
                     String w = neighbor.nodeName;
                     if(!dist.containsKey(w)){
                         dist.put(w, (double) Integer.MAX_VALUE);
@@ -284,15 +299,19 @@ public class GraphService{
         List<String> sorted = new ArrayList<>(centrality.keySet());
         sorted.sort((a, b) -> Double.compare(centrality.get(b), centrality.get(a)));
         return sorted.subList(0, Math.min(k, sorted.size()));
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     //approximate betweenness centrality using Brandes' algorithm
     //instead of running Dijkstra from every node, sample a random subset of sources
     //this gives ~95%+ accuracy with a fraction of the cost
     public List<String> criticalNodesFast(int k, int sampleSize){
-        Graph snap = snapshot();
+        lock.readLock().lock();
+        try {
         HashMap<String, Double> centrality = new HashMap<>();
-        Set<String> allNodes = snap.keySet();
+        Set<String> allNodes = graph.keySet();
         for(String node : allNodes){
             centrality.put(node, 0.0);
         }
@@ -330,7 +349,7 @@ public class GraphService{
                 if(dist.get(v) == Integer.MAX_VALUE) break;
                 stack.push(v);
 
-                for(Node neighbor : snap.getDependents(v)){
+                for(Node neighbor : graph.getDependents(v)){
                     String w = neighbor.nodeName;
                     if(!dist.containsKey(w)){
                         dist.put(w, (double) Integer.MAX_VALUE);
@@ -373,58 +392,90 @@ public class GraphService{
         List<String> sorted = new ArrayList<>(centrality.keySet());
         sorted.sort((a, b) -> Double.compare(centrality.get(b), centrality.get(a)));
         return sorted.subList(0, Math.min(k, sorted.size()));
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
-    //Tarjan's SCC algorithm — single DFS pass
-    //uses a stack and low-link values to find all strongly connected components
-    //faster than Kosaraju's in practice due to single traversal and better cache locality
+    //Tarjan's SCC algorithm — iterative DFS to avoid stack overflow on large graphs
+    //uses an explicit call stack instead of recursion
     public List<List<String>> cyclesTarjan(){
-        Graph snap = snapshot();
+        lock.readLock().lock();
+        try {
         HashMap<String, Integer> index = new HashMap<>();
         HashMap<String, Integer> lowLink = new HashMap<>();
         HashSet<String> onStack = new HashSet<>();
-        Stack<String> stack = new Stack<>();
+        Stack<String> sccStack = new Stack<>();
         List<List<String>> sccs = new ArrayList<>();
-        int[] counter = {0};
+        int counter = 0;
 
-        for(String node : snap.keySet()){
-            if(!index.containsKey(node)){
-                tarjanDFS(snap, node, index, lowLink, onStack, stack, sccs, counter);
+        for(String startNode : graph.keySet()){
+            if(index.containsKey(startNode)) continue;
+
+            // iterative DFS using explicit call stack
+            // each frame: (node, iterator over neighbors, isInitialized)
+            Stack<Object[]> callStack = new Stack<>();
+            List<Node> startNeighbors = new ArrayList<>(graph.getDependents(startNode));
+            callStack.push(new Object[]{startNode, startNeighbors.iterator(), false});
+
+            while(!callStack.isEmpty()){
+                Object[] frame = callStack.peek();
+                String v = (String) frame[0];
+                Iterator<Node> neighbors = (Iterator<Node>) frame[1];
+                boolean initialized = (boolean) frame[2];
+
+                if(!initialized){
+                    // first visit — initialize node
+                    index.put(v, counter);
+                    lowLink.put(v, counter);
+                    counter++;
+                    sccStack.push(v);
+                    onStack.add(v);
+                    frame[2] = true;
+                }
+
+                boolean pushed = false;
+                while(neighbors.hasNext()){
+                    Node neighbor = neighbors.next();
+                    String w = neighbor.nodeName;
+                    if(!index.containsKey(w)){
+                        // unvisited neighbor — push new frame
+                        List<Node> wNeighbors = new ArrayList<>(graph.getDependents(w));
+                        callStack.push(new Object[]{w, wNeighbors.iterator(), false});
+                        pushed = true;
+                        break;
+                    } else if(onStack.contains(w)){
+                        lowLink.put(v, Math.min(lowLink.get(v), index.get(w)));
+                    }
+                }
+
+                if(!pushed){
+                    // all neighbors processed — check for SCC root
+                    if(lowLink.get(v).equals(index.get(v))){
+                        List<String> component = new ArrayList<>();
+                        String w;
+                        do {
+                            w = sccStack.pop();
+                            onStack.remove(w);
+                            component.add(w);
+                        } while(!w.equals(v));
+                        if(component.size() > 1){
+                            sccs.add(component);
+                        }
+                    }
+
+                    // pop this frame and update parent's lowLink
+                    callStack.pop();
+                    if(!callStack.isEmpty()){
+                        String parent = (String) callStack.peek()[0];
+                        lowLink.put(parent, Math.min(lowLink.get(parent), lowLink.get(v)));
+                    }
+                }
             }
         }
         return sccs;
-    }
-
-    private void tarjanDFS(Graph g, String v, HashMap<String, Integer> index,
-                           HashMap<String, Integer> lowLink, HashSet<String> onStack,
-                           Stack<String> stack, List<List<String>> sccs, int[] counter){
-        index.put(v, counter[0]);
-        lowLink.put(v, counter[0]);
-        counter[0]++;
-        stack.push(v);
-        onStack.add(v);
-
-        for(Node neighbor : g.getDependents(v)){
-            String w = neighbor.nodeName;
-            if(!index.containsKey(w)){
-                tarjanDFS(g, w, index, lowLink, onStack, stack, sccs, counter);
-                lowLink.put(v, Math.min(lowLink.get(v), lowLink.get(w)));
-            } else if(onStack.contains(w)){
-                lowLink.put(v, Math.min(lowLink.get(v), index.get(w)));
-            }
-        }
-
-        if(lowLink.get(v).equals(index.get(v))){
-            List<String> component = new ArrayList<>();
-            String w;
-            do {
-                w = stack.pop();
-                onStack.remove(w);
-                component.add(w);
-            } while(!w.equals(v));
-            if(component.size() > 1){
-                sccs.add(component);
-            }
+        } finally {
+            lock.readLock().unlock();
         }
     }
 }

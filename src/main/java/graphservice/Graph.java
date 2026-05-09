@@ -4,6 +4,7 @@ import health.HealthMonitor;
 import java.util.*;
 
 public class Graph{
+    private static final HashSet<Node> EMPTY = new HashSet<>();
     private final HashMap<String, HashSet<Node>> nodes;
     private final HashMap<String, HashSet<Node>> reverseNodes;
     private final HealthMonitor healthMonitor;
@@ -42,11 +43,11 @@ public class Graph{
     }
 
     public HashSet<Node> getDependents(String serviceName){
-        return nodes.getOrDefault(serviceName, new HashSet<>());
+        return nodes.getOrDefault(serviceName, EMPTY);
     }
 
     public HashSet<Node> getPredecessors(String serviceName){
-        return reverseNodes.getOrDefault(serviceName, new HashSet<>());
+        return reverseNodes.getOrDefault(serviceName, EMPTY);
     }
 
      void put(Node from, Node to){
