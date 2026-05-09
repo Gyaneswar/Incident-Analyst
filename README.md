@@ -5,23 +5,14 @@ A real-time service dependency graph analyzer built in Java. It ingests dependen
 ## Architecture
 
 ```
-                         ┌──────────────┐
-  HTTP POST /event ────> │    Queue     │ ──> Worker Pool (4 threads) ──> GraphService
-                         │ (Blocking Q) │                                    │
-                         └──────────────┘                                    ├─ Graph (adjacency list)
-                                                                             ├─ HealthMonitor (latency/error tracking)
-  HTTP GET /reachable ──────────────────────────────────────────────────────> └─ EventToFile (backup)
-  HTTP GET /cycles
-  HTTP GET /shortest_path
-  HTTP GET /critical_services
-  ...
+![img.png](img.png)
 ```
 
 ### Components
 
 - **App** — Javalin HTTP server (port 7070), defines all REST endpoints.
 - **orchestrator** — Bridges the queue, graph, health monitor, and file backup. Polls the queue every 50ms and dispatches events to a thread pool of 4 workers.
-- **GraphService** — Maintains the dependency graph with a `ReentrantReadWriteLock`. All read queries operate on a snapshot (deep copy) of the graph.
+- **GraphService** — Maintains the dependency graph with a `ReentrantReadWriteLock`. Read queries hold the read lock and operate directly on the live graph (no snapshot/copy).
 - **Graph** — Directed graph stored as two adjacency maps (`nodes` for forward edges, `reverseNodes` for reverse edges).
 - **HealthMonitor** — Tracks rolling average latency, P95 latency, error rates, and heartbeat staleness per service edge. Uses `ConcurrentHashMap` with per-deque synchronized blocks.
 - **EventToFile** — Appends every processed event to `events.csv` for durability/replay.
@@ -37,28 +28,30 @@ A real-time service dependency graph analyzer built in Java. It ingests dependen
 
 ---
 
+## Algorithms
+
+| Endpoint | Algorithm | Complexity | Description |
+|---|---|---|---|
+| `/reachable` | BFS | O(V + E) | Forward BFS from source to find all downstream services |
+| `/dependents` | Reverse BFS | O(V + E) | BFS on the reverse adjacency list to find all upstream services |
+| `/cycles` | Tarjan's SCC (iterative) | O(V + E) | Single-pass iterative DFS with low-link values. Finds all strongly connected components; cycles are SCCs with size > 1 |
+| `/shortest_path` | Dijkstra's shortest path | O((V + E) log V) | Priority queue–based shortest path using edge latencies as weights. Early termination when target is reached |
+| `/critical_services` | Approximate Brandes (betweenness centrality) | O(samples × (V + E) log V) | Dijkstra from a random sample of nodes (default 200), scores scaled by V/samples. ~95%+ accuracy vs exact Brandes at a fraction of the cost |
+
+### Benchmark (10K services, 100K events)
+
+| Endpoint | Avg Latency |
+|---|-------------|
+| `/reachable` | 12.64ms     |
+| `/dependents` | 12.09ms     |
+| `/shortest_path` | 5.56ms      |
+| `/cycles` | 16.49ms     |
+| `/critical_services` | 4026.45ms   |
+| `/health` | 0.45ms      |
+
+---
+
 ## Design Decisions and Tradeoffs
-
-### Snapshot-based reads vs. locking every read
-
-Read queries (reachable, cycles, shortest path, critical nodes) do **not** hold a lock while the algorithm runs. Instead, `GraphService.snapshot()` takes the read lock only long enough to deep-copy the graph, then releases it. The algorithm runs on the copy.
-
-**Why:**
-- Graph algorithms like Brandes' betweenness centrality or Kosaraju's SCC are expensive. Holding a read lock for the entire computation would block all writes (`addEvent`, `removeNode`) for the duration.
-- With snapshots, writers are only blocked for the brief moment of the copy. Reads and writes can overlap — the read just operates on a slightly stale but **consistent** view.
-
-**Tradeoff:** Each query allocates a full copy of the graph. This uses more memory but keeps write latency predictable.
-
-### Locks for consistent snapshots vs. thread-safe data structures
-
-I used a `ReentrantReadWriteLock` in `GraphService` rather than making `Graph` use `ConcurrentHashMap` / concurrent sets internally.
-
-**Why:**
-- `Graph.put()` does compound read-then-write operations (check if edge exists, update latency or add new node). These are not atomic even with `ConcurrentHashMap`.
-- `snapshot()` copies both `nodes` and `reverseNodes`. With concurrent data structures alone, there is no guarantee that the snapshot sees a consistent state across both maps — a forward edge could be present without its corresponding reverse edge.
-- The lock ensures the snapshot captures both maps at the same logical point in time.
-
-**Tradeoff:** Reads are fully parallelized — multiple queries can snapshot and run concurrently since they only acquire the read lock. Writes are serialized, but this is acceptable because write throughput is bounded by the worker pool (4 threads) and the queue polling rate (50ms), not by lock contention.
 
 ### Single-file event backup
 
@@ -84,7 +77,7 @@ There is currently one `LinkedBlockingQueue` for mutation events (`DEPENDENCY_OB
 
 From the user's perspective, the system appears fully parallelized:
 - **`POST /event` returns instantly** — the event is pushed to the queue and the response comes back immediately. The actual graph mutation happens asynchronously in a background worker thread.
-- **Read queries run concurrently** — multiple queries snapshot the graph in parallel (read lock allows concurrent access) and run their algorithms on independent copies.
+- **Read queries run concurrently** — multiple queries hold the read lock in parallel and operate on the live graph. No deep copy overhead.
 - **Write serialization is invisible** — the write lock only affects the background worker threads. The user-facing HTTP layer never blocks on it.
 
 ---
@@ -117,7 +110,7 @@ Creates an `events.csv` file that the server replays on startup.
 ```bash
 # Generate 1000 events across 20 services
 javac generator/DatasetGenerator.java
-java -cp . generator.DatasetGenerator generate 20 1000
+java generator.DatasetGenerator generate 20 1000
 ```
 
 ### 2. Produce events to the running server (online)
@@ -126,7 +119,7 @@ POSTs events to `POST /event` using multiple concurrent producer threads.
 
 ```bash
 # Send 5000 events across 50 services using 4 producer threads
-java -cp . generator.DatasetGenerator produce 50 5000 4
+java generator.DatasetGenerator produce 50 5000 4
 ```
 
 ### 3. Produce events + benchmark API endpoints
@@ -135,7 +128,7 @@ Produces events to the running server, then calls every query endpoint and repor
 
 ```bash
 # Produce 1000 events across 20 services, then benchmark all endpoints
-java -cp . generator.DatasetGenerator test 20 1000
+java generator.DatasetGenerator test 20 1000
 ```
 
 ---
@@ -191,23 +184,12 @@ curl "http://localhost:7070/dependents?service=db-service"
 {"service": "db-service", "dependents": ["db-service", "user-service", "api-gateway"]}
 ```
 
-### GET /cycles — Detect circular dependencies (Kosaraju's SCC, two-pass DFS)
+### GET /cycles — Detect circular dependencies (Tarjan's SCC)
+
+Uses Tarjan's algorithm — iterative single-pass DFS with low-link values. Finds all strongly connected components with size > 1 (cycles). The old Kosaraju's two-pass DFS is still available in `GraphService.cycles()` but commented out in `App.java`.
 
 ```bash
 curl http://localhost:7070/cycles
-```
-
-**Response:**
-```json
-{"cycles": [["service-a", "service-b", "service-c"]]}
-```
-
-### GET /cycles_fast — Detect circular dependencies (Tarjan's SCC, single-pass DFS)
-
-Same result as `/cycles` but uses Tarjan's algorithm — single DFS pass with better cache locality, ~1.5-2x faster in practice.
-
-```bash
-curl http://localhost:7070/cycles_fast
 ```
 
 **Response:**
@@ -226,30 +208,17 @@ curl "http://localhost:7070/shortest_path?from=api-gateway&to=db-service"
 {"from": "api-gateway", "to": "db-service", "path": ["api-gateway", "user-service", "db-service"]}
 ```
 
-### GET /critical_services — Top-k most critical services (Brandes' exact betweenness centrality)
+### GET /critical_services — Top-k critical services (approximate Brandes)
 
-Runs Dijkstra from **every** node. Exact but slow on large graphs — O(V × (E + V log V)).
+Runs Dijkstra from a **random sample** of nodes instead of all V, then scales scores by `V/samples`. The `samples` parameter controls the number of source nodes sampled (default 200). The old exact Brandes (Dijkstra from every node) is still available in `GraphService.criticalNodes()` but commented out in `App.java`.
 
 ```bash
-curl "http://localhost:7070/critical_services?k=5"
+curl "http://localhost:7070/critical_services?k=5&samples=200"
 ```
 
 **Response:**
 ```json
-{"k": 5, "critical_services": ["user-service", "api-gateway", "auth-service", "db-service", "cache"]}
-```
-
-### GET /critical_services_fast — Top-k critical services (approximate Brandes)
-
-Runs Dijkstra from a **random sample** of nodes instead of all V. ~95%+ accuracy at a fraction of the cost. The `samples` parameter controls the number of source nodes sampled (default 100).
-
-```bash
-curl "http://localhost:7070/critical_services_fast?k=5&samples=100"
-```
-
-**Response:**
-```json
-{"k": 5, "samples": 100, "critical_services": ["user-service", "api-gateway", "auth-service", "db-service", "cache"]}
+{"k": 5, "samples": 200, "critical_services": ["user-service", "api-gateway", "auth-service", "db-service", "cache"]}
 ```
 
 ### GET /health — Health metrics for an edge between two services
@@ -277,13 +246,13 @@ curl "http://localhost:7070/health?from=api-gateway&to=user-service"
 
 ## Concurrency Model
 
-| Component | Mechanism | Parallel? |
-|---|---|---|
-| HTTP requests | Jetty thread pool | Yes |
-| Event processing | Worker pool (4 threads) | Yes |
-| Graph writes (`addEvent`, `removeNode`) | Write lock | Serialized |
-| Graph reads (all queries) | Read lock + snapshot | Yes, concurrent with each other |
-| HealthMonitor | `ConcurrentHashMap` + per-deque `synchronized` | Yes |
+| Component | Mechanism                                      | Parallel?                       |
+|---|------------------------------------------------|---------------------------------|
+| HTTP requests | Jetty thread pool                              | Yes                             |
+| Event processing | Worker pool (10 threads)                        | Yes                             |
+| Graph writes (`addEvent`, `removeNode`) | Write lock                                     | yes, requests go to the queue   |
+| Graph reads (all queries) | Read lock on live graph                        | Yes, concurrent with each other |
+| HealthMonitor | `ConcurrentHashMap` + per-deque `synchronized` | Yes                             |
 
 ---
 
@@ -295,7 +264,7 @@ src/main/java/
     App.java              # Entry point, HTTP server, endpoint definitions
   graphservice/
     Graph.java            # Directed graph (adjacency list + reverse adjacency list)
-    GraphService.java     # Thread-safe graph operations with snapshot reads
+    GraphService.java     # Thread-safe graph operations with read-lock reads
     Node.java             # Graph node (service name + latency)
     orchestrator.java     # Event dispatcher: queue -> workers -> graph/health/file
   health/
