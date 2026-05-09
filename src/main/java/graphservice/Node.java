@@ -14,6 +14,11 @@ public class Node{
     }
 
     @Override
+    public String toString(){
+        return nodeName + "(lat=" + latency + ")";
+    }
+
+    @Override
     public boolean equals(Object o){
         if(this == o) return true;
         if(o == null || getClass() != o.getClass()) return false;

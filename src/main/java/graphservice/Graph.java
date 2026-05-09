@@ -99,4 +99,13 @@ public class Graph{
         reverseNodes.remove(serviceName);
     }
 
+    @Override
+    public String toString(){
+        StringBuilder sb = new StringBuilder("Graph[\n");
+        for(Map.Entry<String, HashSet<Node>> entry : nodes.entrySet()){
+            sb.append("  ").append(entry.getKey()).append(" -> ").append(entry.getValue()).append("\n");
+        }
+        sb.append("]");
+        return sb.toString();
+    }
 }

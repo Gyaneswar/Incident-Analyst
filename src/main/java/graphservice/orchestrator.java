@@ -6,6 +6,7 @@ import queueservice.queue;
 import faulttolerance.EventToFile;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -23,7 +24,7 @@ public class orchestrator {
 
     public orchestrator(queue eventQueue, GraphService graphService, EventToFile eventToFile, int workerThreads, HealthMonitor healthMonitor){
         this.eventQueue = eventQueue;
-        this.graphService = new GraphService(healthMonitor);
+        this.graphService = graphService;
         this.eventToFile = eventToFile;
         this.poller = Executors.newSingleThreadScheduledExecutor();
         this.workerPool = Executors.newFixedThreadPool(workerThreads);
@@ -59,6 +60,36 @@ public class orchestrator {
                 healthMonitor.recordHeartbeat(event);
                 break;
         }
+    }
+
+    // --- Query delegation ---
+
+    public void publishEvent(Event event) throws InterruptedException {
+        eventQueue.publish(event);
+    }
+
+    public List<String> getReachable(String service){
+        return graphService.getReachable(service);
+    }
+
+    public List<String> getPredecessors(String service){
+        return graphService.predecessors(service);
+    }
+
+    public List<List<String>> getCycles(){
+        return graphService.cycles();
+    }
+
+    public List<String> getShortestPath(String from, String to){
+        return graphService.shortestPath(from, to);
+    }
+
+    public List<String> getCriticalNodes(int k){
+        return graphService.criticalNodes(k);
+    }
+
+    public Map<String, Object> getHealth(String from, String to){
+        return healthMonitor.getServiceHealth(from, to);
     }
 
     public void shutdown(){

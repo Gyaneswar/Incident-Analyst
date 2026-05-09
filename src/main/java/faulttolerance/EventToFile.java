@@ -32,7 +32,6 @@ public class EventToFile {
                 File file = new File(FILE_PATH);
                 if (!file.exists()) return null;
                 reader = new BufferedReader(new FileReader(file));
-                reader.readLine(); // skip header
             }
             String line = reader.readLine();
             if (line == null) {

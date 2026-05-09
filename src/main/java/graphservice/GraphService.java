@@ -56,8 +56,9 @@ public class GraphService{
     private Graph snapshot(){
         lock.writeLock().lock();
         try {
-            System.out.println("Taking snapshot");
-            return graph.snapshot();
+            Graph snap = graph.snapshot();
+            System.out.println("Snapshot: " + snap);
+            return snap;
         } finally {
             lock.writeLock().unlock();
         }

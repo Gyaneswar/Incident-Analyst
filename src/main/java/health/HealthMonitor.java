@@ -107,4 +107,18 @@ public class HealthMonitor {
         health.put("last_heartbeat", getLastHeartbeat(service));
         return health;
     }
+
+    public Map<String, Object> getServiceHealth(String from, String to){
+        Map<String, Object> health = new HashMap<>();
+        health.put("from", from);
+        health.put("to", to);
+        health.put("rolling_avg_latency", getRollingAverageLatency(from, to));
+        health.put("p95_latency", calculateP95Latency(from, to));
+        health.put("error_rate", calculateErrorRate(from, to));
+        health.put("from_stale", isStale(from));
+        health.put("to_stale", isStale(to));
+        health.put("from_last_heartbeat", getLastHeartbeat(from));
+        health.put("to_last_heartbeat", getLastHeartbeat(to));
+        return health;
+    }
 }
