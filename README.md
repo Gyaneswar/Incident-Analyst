@@ -320,4 +320,5 @@ src/main/java/
     EventType.java        # DEPENDENCY_OBSERVED | DEPENDENCY_REMOVED | HEARTBEAT
 generator/
   DatasetGenerator.java   # Offline CSV generation, online event producer, API benchmark
+events.csv                # Auto-generated in project root; append-log of all processed events (used for replay on restart)
 ```
