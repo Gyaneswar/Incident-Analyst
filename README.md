@@ -67,9 +67,27 @@ There is currently one `LinkedBlockingQueue` for mutation events (`DEPENDENCY_OB
 
 **Why:** If queries went through the queue, I would need a mechanism to correlate each request with its response (e.g., a per-request `CompletableFuture` or a response map keyed by request ID). By dispatching queries directly to the orchestrator, I avoid this request-response tracking complexity entirely — the HTTP thread calls the method, gets the result, and returns it.
 
+**Backpressure:** The queue has a fixed capacity of 10,000 events. When the queue is full, `queue.put()` (a `LinkedBlockingQueue` method) **blocks the producer thread** until a consumer drains a slot. Since `POST /event` calls `queue.put()` on the HTTP handler thread, the HTTP response is delayed — the client experiences increased latency but **no events are silently dropped**. This is a deliberate choice: blocking the producer applies natural backpressure all the way to the caller, signaling that the system is overloaded.
+
 **Tradeoff / future scaling:**
 - A single queue is a natural bottleneck as producer throughput grows.
 - This can be scaled by introducing **multiple independent queues** (e.g., partitioned by service name or event type), each with its own consumer pool. This allows horizontal scaling of event processing while maintaining ordering guarantees within a partition.
+- If blocking the HTTP thread is unacceptable, `queue.offer()` with a timeout could be used instead to return a `503 Service Unavailable` to the client when the queue is full, shedding load explicitly.
+
+### Idempotency
+
+`DEPENDENCY_OBSERVED` events are idempotent. If the same edge `A -> B` is observed multiple times, the graph does not create duplicate edges — `Graph.put` checks if the edge already exists and updates its latency (rolling average) instead of adding a new one. Health metrics simply append to the per-service sliding window, so repeated events contribute to the rolling statistics naturally without corrupting state.
+
+`DEPENDENCY_REMOVED` is also idempotent — removing a non-existent edge is a no-op (the `removeIf` on the adjacency set simply matches nothing).
+
+### Out-of-order events
+
+If a `DEPENDENCY_REMOVED` arrives **before** the corresponding `DEPENDENCY_OBSERVED` for an edge:
+
+- **The remove is a safe no-op.** `Graph.removeEdge` looks up the edge in the adjacency set; if the edge doesn't exist yet, `removeIf` matches nothing and the graph is unchanged.
+- **When the `DEPENDENCY_OBSERVED` arrives later**, it creates the edge as usual. The graph now contains the edge even though a remove was already processed for it.
+
+This is the expected behaviour in an eventually-consistent system — the last-write-wins. If strict ordering is required, events should be partitioned by edge (e.g., by `fromService + toService`) so that events for the same edge are always processed in order within a single partition.
 
 ### User-facing parallelism
 
