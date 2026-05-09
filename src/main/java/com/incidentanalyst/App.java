@@ -16,7 +16,7 @@ public class App {
         GraphService graphService = new GraphService(healthMonitor);
         queue eventQueue = new queue();
         EventToFile eventToFile = new EventToFile();
-        orchestrator orch = new orchestrator(eventQueue, graphService, eventToFile, 500, healthMonitor);
+        orchestrator orch = new orchestrator(eventQueue, graphService, eventToFile, 50, healthMonitor);
         orch.start();
 
         Javalin app = Javalin.create()
