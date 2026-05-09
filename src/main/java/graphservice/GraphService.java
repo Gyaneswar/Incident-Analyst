@@ -17,6 +17,12 @@ public class GraphService{
         init();
     }
 
+    GraphService(HealthMonitor healthMonitor, boolean skipInit){
+        this.healthMonitor = healthMonitor;
+        this.graph = new Graph(healthMonitor);
+        if(!skipInit) init();
+    }
+
     private void init(){
         //use the faulttolerance.EventToFile to read the events from the file
         EventToFile eventToFile = new EventToFile();
