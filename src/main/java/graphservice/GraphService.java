@@ -163,7 +163,7 @@ public class GraphService{
 
 
     //use Dijkstra to find the shortest path
-    public List<String> shortestPath(String fromService, String toService){
+    public Map<String, Object> shortestPath(String fromService, String toService){
         lock.readLock().lock();
         try {
         HashMap<String, Double> dist = new HashMap<>();
@@ -200,7 +200,7 @@ public class GraphService{
 
         // reconstruct path by backtracking from target
         if(!previous.containsKey(toService) && !fromService.equals(toService)){
-            return Collections.emptyList();
+            return Map.of("path", Collections.emptyList(), "latency", 0.0);
         }
         LinkedList<String> path = new LinkedList<>();
         String current = toService;
@@ -208,7 +208,8 @@ public class GraphService{
             path.addFirst(current);
             current = previous.get(current);
         }
-        return path;
+        double totalLatency = dist.getOrDefault(toService, 0.0);
+        return Map.of("path", path, "latency", totalLatency);
         } finally {
             lock.readLock().unlock();
         }

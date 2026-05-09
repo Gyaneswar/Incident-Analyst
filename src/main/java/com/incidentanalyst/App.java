@@ -69,8 +69,8 @@ public class App {
             String from = ctx.queryParam("from");
             String to = ctx.queryParam("to");
             if(from == null || to == null){ ctx.status(400).json(Map.of("error", "missing 'from' or 'to' param")); return; }
-            List<String> result = orch.getShortestPath(from, to);
-            ctx.json(Map.of("from", from, "to", to, "path", result));
+            Map<String, Object> result = orch.getShortestPath(from, to);
+            ctx.json(Map.of("from", from, "to", to, "path", result.get("path"), "latency", result.get("latency")));
         });
 
         // GET /critical_services?k=5 (Brandes' — exact)

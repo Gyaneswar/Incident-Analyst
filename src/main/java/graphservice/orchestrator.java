@@ -89,7 +89,7 @@ public class orchestrator {
         return graphService.cyclesTarjan();
     }
 
-    public List<String> getShortestPath(String from, String to){
+    public Map<String, Object> getShortestPath(String from, String to){
         return graphService.shortestPath(from, to);
     }
 

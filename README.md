@@ -203,7 +203,7 @@ curl "http://localhost:7070/shortest_path?from=api-gateway&to=db-service"
 
 **Response:**
 ```json
-{"from": "api-gateway", "to": "db-service", "path": ["api-gateway", "user-service", "db-service"]}
+{"from": "api-gateway", "to": "db-service", "path": ["api-gateway", "user-service", "db-service"], "latency": 87.5}
 ```
 
 ### GET /critical_services — Top-k critical services (approximate Brandes)
