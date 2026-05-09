@@ -5,7 +5,8 @@ A real-time service dependency graph analyzer built in Java. It ingests dependen
 ## Architecture
 
 ```
-![img.png](img.png)
+<img width="1321" height="828" alt="image" src="https://github.com/user-attachments/assets/24ab65a6-9e73-45a7-8b3c-b09f3374d740" />
+
 ```
 
 ### Components
