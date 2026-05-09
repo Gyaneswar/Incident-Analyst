@@ -9,7 +9,7 @@ A real-time service dependency graph analyzer built in Java. It ingests dependen
 ### Components
 
 - **App** — Javalin HTTP server (port 7070), defines all REST endpoints.
-- **orchestrator** — Bridges the queue, graph, health monitor, and file backup. Polls the queue every 50ms and dispatches events to a thread pool of 4 workers.
+- **orchestrator** — Bridges the queue, graph, health monitor, and file backup. Polls the queue every 50ms and dispatches events to a thread pool of 50 workers.
 - **GraphService** — Maintains the dependency graph with a `ReentrantReadWriteLock`. Read queries hold the read lock and operate directly on the live graph (no snapshot/copy).
 - **Graph** — Directed graph stored as two adjacency maps (`nodes` for forward edges, `reverseNodes` for reverse edges).
 - **HealthMonitor** — Tracks per-service P95 latency, error rate, rolling average latency, and heartbeat staleness. Metrics are keyed by the destination service (`toService`). Uses `ConcurrentHashMap` with per-deque synchronized blocks.
@@ -95,8 +95,8 @@ The system uses four distinct executor pools, each with a specific responsibilit
 
 | Pool | Type | Location | Why |
 |---|---|---|---|
-| **Poller** | `ScheduledExecutorService` (250 threads) | `orchestrator` | Polls the queue every 50ms. Multiple poller threads increase drain throughput under burst load. |
-| **Worker pool** | `FixedThreadPool` (500 threads) | `orchestrator` | Processes events (graph mutation, health update, file write). Bounded to cap CPU/memory. Events are independent so they can be processed concurrently. |
+| **Poller** | `ScheduledExecutorService` (25 threads) | `orchestrator` | Polls the queue every 50ms. Multiple poller threads increase drain throughput under burst load. |
+| **Worker pool** | `FixedThreadPool` (50 threads) | `orchestrator` | Processes events (graph mutation, health update, file write). Bounded to cap CPU/memory. Events are independent so they can be processed concurrently. |
 | **Write executor** | `SingleThreadExecutor` | `EventToFile` | Serializes CSV appends so concurrent workers don't interleave writes or corrupt the file. |
 | **HTTP thread pool** | Jetty default pool | `Javalin / App` | Handles inbound HTTP requests. Query endpoints run directly on these threads under the read lock — no queue hop needed. |
 
@@ -304,7 +304,7 @@ On `SIGTERM` (or normal JVM termination), a shutdown hook runs in order:
 | Component | Mechanism                                      | Parallel?                       |
 |---|------------------------------------------------|---------------------------------|
 | HTTP requests | Jetty thread pool                              | Yes                             |
-| Event processing | Worker pool (10 threads)                        | Yes                             |
+| Event processing | Worker pool (50 threads)                        | Yes                             |
 | Graph writes (`addEvent`, `removeNode`) | Write lock                                     | yes, requests go to the queue   |
 | Graph reads (all queries) | Read lock on live graph                        | Yes, concurrent with each other |
 | HealthMonitor | `ConcurrentHashMap` + per-deque `synchronized` | Yes                             |
