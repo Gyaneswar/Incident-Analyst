@@ -1,6 +1,7 @@
 package generator;
 
 import java.io.BufferedWriter;
+import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URI;
@@ -147,6 +148,17 @@ public class DatasetGenerator {
     }
 
     private static void testEndpoints(int numServices, int numEvents) throws Exception {
+        // delete old events file before starting
+        File eventsFile = new File(OUTPUT_FILE);
+        if(eventsFile.exists() && eventsFile.delete()){
+            System.out.println("Deleted " + OUTPUT_FILE);
+        }
+
+        // produce events to the running server first
+        System.out.println("=== Producing %d events for %d services ===\n".formatted(numEvents, numServices));
+        produce(numServices, numEvents, 4);
+        System.out.println();
+
         HttpClient client = HttpClient.newHttpClient();
         Random random = new Random();
         String svc1 = "service-" + random.nextInt(numServices);
@@ -157,21 +169,21 @@ public class DatasetGenerator {
         System.out.println("Using services: " + svc1 + ", " + svc2 + "\n");
 
         callAndPrint(client, "/reachable?service=" + svc1);
-        callAndPrint(client, "/predecessors?service=" + svc1);
+        callAndPrint(client, "/dependents?service=" + svc1);
         callAndPrint(client, "/shortest_path?from=" + svc1 + "&to=" + svc2);
         callAndPrint(client, "/cycles");
         callAndPrint(client, "/critical_services?k=5");
-        callAndPrint(client, "/health" + svc1 + "&to=" + svc2);
+        callAndPrint(client, "/health?from=" + svc1 + "&to=" + svc2);
 
         System.out.println("\n=== Latency Benchmark (10 runs each) ===\n");
 
         String[] endpoints = {
             "/reachable?service=" + svc1,
-            "/predecessors?service=" + svc1,
+            "/dependents?service=" + svc1,
             "/shortest_path?from=" + svc1 + "&to=" + svc2,
             "/cycles",
             "/critical_services?k=5",
-            "/health" + svc1 + "&to=" + svc2
+            "/health?from=" + svc1 + "&to=" + svc2
         };
 
         for (String endpoint : endpoints) {

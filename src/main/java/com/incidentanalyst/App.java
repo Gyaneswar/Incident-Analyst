@@ -16,7 +16,7 @@ public class App {
         GraphService graphService = new GraphService(healthMonitor);
         queue eventQueue = new queue();
         EventToFile eventToFile = new EventToFile();
-        orchestrator orch = new orchestrator(eventQueue, graphService, eventToFile, 4, healthMonitor);
+        orchestrator orch = new orchestrator(eventQueue, graphService, eventToFile, 20, healthMonitor);
         orch.start();
 
         Javalin app = Javalin.create()
@@ -44,17 +44,23 @@ public class App {
             ctx.json(Map.of("service", service, "reachable", result));
         });
 
-        // GET /predecessors?service=A
-        app.get("/predecessors", ctx -> {
+        // GET /dependents?service=A
+        app.get("/dependents", ctx -> {
             String service = ctx.queryParam("service");
             if(service == null){ ctx.status(400).json(Map.of("error", "missing 'service' param")); return; }
             List<String> result = orch.getPredecessors(service);
-            ctx.json(Map.of("service", service, "predecessors", result));
+            ctx.json(Map.of("service", service, "dependents", result));
         });
 
-        // GET /cycles
+        // GET /cycles (Kosaraju's — two-pass DFS)
+        //app.get("/cycles", ctx -> {
+        //    List<List<String>> result = orch.getCycles();
+        //    ctx.json(Map.of("cycles", result));
+        //});
+
+        // GET /cycles (Tarjan's — single DFS pass)
         app.get("/cycles", ctx -> {
-            List<List<String>> result = orch.getCycles();
+            List<List<String>> result = orch.getCyclesTarjan();
             ctx.json(Map.of("cycles", result));
         });
 
@@ -67,12 +73,22 @@ public class App {
             ctx.json(Map.of("from", from, "to", to, "path", result));
         });
 
-        // GET /critical_services?k=5
+        // GET /critical_services?k=5 (Brandes' — exact)
+        //app.get("/critical_services", ctx -> {
+        //    String kParam = ctx.queryParam("k");
+        //    int k = (kParam != null) ? Integer.parseInt(kParam) : 5;
+        //    List<String> result = orch.getCriticalNodes(k);
+        //    ctx.json(Map.of("k", k, "critical_services", result));
+        //});
+
+        // GET /critical_services?k=5&samples=200 (approximate Brandes)
         app.get("/critical_services", ctx -> {
             String kParam = ctx.queryParam("k");
+            String samplesParam = ctx.queryParam("samples");
             int k = (kParam != null) ? Integer.parseInt(kParam) : 5;
-            List<String> result = orch.getCriticalNodes(k);
-            ctx.json(Map.of("k", k, "critical_services", result));
+            int samples = (samplesParam != null) ? Integer.parseInt(samplesParam) : 200;
+            List<String> result = orch.getCriticalNodesFast(k, samples);
+            ctx.json(Map.of("k", k, "samples", samples, "critical_services", result));
         });
 
         // GET /health?from=A&to=B

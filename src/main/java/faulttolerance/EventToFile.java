@@ -11,19 +11,21 @@ public class EventToFile {
     private BufferedReader reader;
 
     public void writeEvents(Event event){
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(FILE_PATH, true))){
-            writer.write(String.join(",",
-                    event.getEventId(),
-                    event.getEventType().name(),
-                    event.getFromService(),
-                    event.getToService(),
-                    String.valueOf(event.getLatency()),
-                    String.valueOf(event.getTimestamp()),
-                    event.getStatus()));
-            writer.newLine();
-        } catch (IOException e) {
-            System.err.println("Failed to write event: " + e.getMessage());
-        }
+        new Thread(() -> {
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(FILE_PATH, true))){
+                writer.write(String.join(",",
+                        event.getEventId(),
+                        event.getEventType().name(),
+                        event.getFromService(),
+                        event.getToService(),
+                        String.valueOf(event.getLatency()),
+                        String.valueOf(event.getTimestamp()),
+                        event.getStatus()));
+                writer.newLine();
+            } catch (IOException e) {
+                System.err.println("Failed to write event: " + e.getMessage());
+            }
+        }).start();
     }
 
     public Event readEvents(){

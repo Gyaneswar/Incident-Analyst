@@ -22,17 +22,22 @@ public class orchestrator {
     private final ExecutorService workerPool;
     private volatile boolean running = true;
 
+    private final int pollerThreads;
+
     public orchestrator(queue eventQueue, GraphService graphService, EventToFile eventToFile, int workerThreads, HealthMonitor healthMonitor){
         this.eventQueue = eventQueue;
         this.graphService = graphService;
         this.eventToFile = eventToFile;
-        this.poller = Executors.newSingleThreadScheduledExecutor();
+        this.pollerThreads = Math.max(1, workerThreads / 2);
+        this.poller = Executors.newScheduledThreadPool(pollerThreads);
         this.workerPool = Executors.newFixedThreadPool(workerThreads);
         this.healthMonitor = healthMonitor;
     }
 
     public void start(){
-        poller.scheduleAtFixedRate(this::pollQueue, 0, 50, TimeUnit.MILLISECONDS);
+        for(int i = 0; i < pollerThreads; i++){
+            poller.scheduleAtFixedRate(this::pollQueue, 0, 50, TimeUnit.MILLISECONDS);
+        }
     }
 
     private void pollQueue(){
@@ -80,12 +85,20 @@ public class orchestrator {
         return graphService.cycles();
     }
 
+    public List<List<String>> getCyclesTarjan(){
+        return graphService.cyclesTarjan();
+    }
+
     public List<String> getShortestPath(String from, String to){
         return graphService.shortestPath(from, to);
     }
 
     public List<String> getCriticalNodes(int k){
         return graphService.criticalNodes(k);
+    }
+
+    public List<String> getCriticalNodesFast(int k, int sampleSize){
+        return graphService.criticalNodesFast(k, sampleSize);
     }
 
     public Map<String, Object> getHealth(String from, String to){
