@@ -95,6 +95,24 @@ The server starts on `http://localhost:7070`. On startup it replays any existing
 
 > If port 7070 is already occupied, the server will throw a bind error. You can change the port in `App.java` (`.start(7070)`).
 
+## Tests
+
+Unit tests for all graph-processing features are in `src/test/java/graphservice/GraphServiceTest.java` (JUnit 5, 25 tests).
+
+```bash
+mvn test -Dtest=graphservice.GraphServiceTest
+```
+
+| Category | Tests | What's verified |
+|---|---|---|
+| `/reachable` (BFS) | 4 | Forward reachability from root, mid-node, leaf, and unknown node |
+| `/dependents` (Reverse BFS) | 3 | Upstream predecessors for leaf, root, and branch nodes |
+| `/cycles` (Tarjan's SCC) | 3 | No cycles in DAG, large cycle detection, small cycle detection |
+| `/shortest_path` (Dijkstra) | 6 | Direct hop, multi-hop, cheaper shortcut selection, self-path, unreachable, branch path — all with latency verification |
+| `/critical_services` (Brandes) | 2 | Top-k count, hub node ranks high in star topology |
+| `/health` (per-service) | 5 | P95 single/multi-value, error rate 0% and 20%, unknown service defaults |
+| Edge removal | 2 | Path breaks after removal, alternate path still works |
+
 ---
 
 ## Data Generator
