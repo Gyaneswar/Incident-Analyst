@@ -89,6 +89,19 @@ If a `DEPENDENCY_REMOVED` arrives **before** the corresponding `DEPENDENCY_OBSER
 
 This is the expected behaviour in an eventually-consistent system — the last-write-wins. If strict ordering is required, events should be partitioned by edge (e.g., by `fromService + toService`) so that events for the same edge are always processed in order within a single partition.
 
+### Thread pool architecture
+
+The system uses four distinct executor pools, each with a specific responsibility:
+
+| Pool | Type | Location | Why |
+|---|---|---|---|
+| **Poller** | `ScheduledExecutorService` (250 threads) | `orchestrator` | Polls the queue every 50ms. Multiple poller threads increase drain throughput under burst load. |
+| **Worker pool** | `FixedThreadPool` (500 threads) | `orchestrator` | Processes events (graph mutation, health update, file write). Bounded to cap CPU/memory. Events are independent so they can be processed concurrently. |
+| **Write executor** | `SingleThreadExecutor` | `EventToFile` | Serializes CSV appends so concurrent workers don't interleave writes or corrupt the file. |
+| **HTTP thread pool** | Jetty default pool | `Javalin / App` | Handles inbound HTTP requests. Query endpoints run directly on these threads under the read lock — no queue hop needed. |
+
+**Why separate pools?** Each pool has a different throughput characteristic and failure domain. The poller is I/O-idle (just `queue.poll()`), workers are CPU-bound (graph + health updates), and the write executor is disk-bound. Isolating them prevents a slow disk from starving event processing, and prevents a burst of events from blocking query responses.
+
 ### User-facing parallelism
 
 From the user's perspective, the system appears fully parallelized:
