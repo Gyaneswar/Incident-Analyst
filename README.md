@@ -3,7 +3,8 @@
 A real-time service dependency graph analyzer built in Java. It ingests dependency events between microservices, builds a live directed graph, and exposes HTTP endpoints for graph queries like reachability, cycle detection, shortest path, and critical service identification.
 
 ## Architecture
-<img width="1824" height="1029" alt="image" src="https://github.com/user-attachments/assets/25f87284-5bb6-4a16-bc18-4dadb7c7f3c2" />
+<img width="1419" height="853" alt="image" src="https://github.com/user-attachments/assets/68bbbf80-a575-4d5f-a1bb-88ba5eb0375d" />
+
 
 ### Components
 
